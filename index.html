@@ -33,6 +33,16 @@ input[type=text],input[type=password]{font:inherit;border:1px solid var(--line);
 .pill{border-radius:20px;padding:4px 12px;font-size:13px;font-weight:600;white-space:nowrap}
 .pill.ok{background:var(--okbg);color:var(--ok)}.pill.ro{background:#e9edf4;color:var(--muted)}.pill.warn{background:var(--warnbg);color:var(--warn)}
 .acting-txt{font-weight:600}
+.offline{background:var(--bad);color:#fff;padding:8px 12px;font-size:14px;font-weight:600;text-align:center}
+.qbox{border-color:#b9cdf3;background:#f6f9ff}
+.qcur{font-size:14px}
+.qlist{display:flex;flex-direction:column;gap:2px}
+.qrow{display:grid;grid-template-columns:26px minmax(0,1fr) auto auto;gap:6px;align-items:center;padding:2px 0}
+.qrow.off .nm{color:var(--muted)}.qrow .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.qn{text-align:center;color:var(--muted);font-weight:700}
+.hand{animation:wave 1.2s ease-in-out infinite;display:inline-block}
+@keyframes wave{50%{transform:rotate(-18deg)}}
+.hand-btn.up{background:var(--warnbg);border-color:#f1d9a8;color:var(--warn);font-weight:700}
+.qinfo{font-weight:700;color:var(--brand)}
 .demo{background:var(--warnbg);color:var(--warn);padding:6px 12px;font-size:13px;border-bottom:1px solid #f1d9a8}
 .main{flex:1;display:grid;grid-template-columns:minmax(0,1fr) 350px;min-height:0}
 .main.noside{grid-template-columns:minmax(0,1fr)}
@@ -520,14 +530,14 @@ const BK={db:null,off:0,auth:null,fdb:null,TS:()=>Date.now()};
 const sNow=()=>Date.now()+(BK.off||0);
 function loadScript(src){return new Promise((res,rej)=>{const s=document.createElement('script');s.src=src;s.onload=res;s.onerror=()=>rej(new Error('Не вдалося завантажити '+src));document.head.append(s)})}
 async function initBackend(role){
-  if(DEMO){BK.db=new LocalDB();return}
+  if(DEMO){BK.db=new LocalDB();Conn.init();return}
   if(JSON.stringify(CFG).includes('ВАШ'))throw new Error('Вставте свій firebaseConfig у верхній частині index.html (див. README).');
   const V='10.12.2',B='https://www.gstatic.com/firebasejs/'+V+'/';
   await loadScript(B+'firebase-app-compat.js');await Promise.all([loadScript(B+'firebase-database-compat.js'),loadScript(B+'firebase-auth-compat.js')]);
   const app=firebase.initializeApp(CFG,role==='t'?'collab-teacher':'collab-student');
   BK.auth=app.auth();BK.fdb=app.database();BK.db={ref:p=>BK.fdb.ref(p)};
   BK.TS=()=>firebase.database.ServerValue.TIMESTAMP;
-  BK.fdb.ref('.info/serverTimeOffset').on('value',s=>{BK.off=s.val()||0})}
+  BK.fdb.ref('.info/serverTimeOffset').on('value',s=>{BK.off=s.val()||0});Conn.init()}
 /* Демо: «база» в localStorage, зміни між вкладками — через BroadcastChannel */
 const _parts=p=>String(p).split('/').filter(Boolean);
 function _get(t,p){for(const k of _parts(p)){if(t==null||typeof t!=='object')return null;t=t[k]}return t===undefined?null:t}
@@ -565,6 +575,22 @@ class LRef{
     remove(){db.disc.push(()=>s.remove());return Promise.resolve()},set(v){db.disc.push(()=>s.set(v));return Promise.resolve()},cancel(){db.disc=[];return Promise.resolve()}}}}
 
 let ROOM='';
+/* Стан з'єднання з сервером */
+const Conn={on:true,ls:new Set(),
+  init(){if(DEMO){addEventListener('online',()=>this.set(true));addEventListener('offline',()=>this.set(false));this.set(navigator.onLine);window.__setConn=v=>this.set(v);return}
+    BK.fdb.ref('.info/connected').on('value',s=>this.set(s.val()===true))},
+  set(v){if(v===this.on)return;this.on=v;this.ls.forEach(f=>{try{f(v)}catch(e){console.error(e)}})},
+  sub(f){this.ls.add(f);return()=>this.ls.delete(f)}};
+function connBanner(){
+  const b=el('div',{class:'offline',role:'alert',style:'display:none'},'⚠ Немає зв\'язку з сервером. Дії тимчасово не надсилаються — перевірте інтернет. Щойно зв\'язок з\'явиться, усе оновиться автоматично.');
+  let t=null,shown=false;
+  Conn.sub(v=>{clearTimeout(t);if(!v)t=setTimeout(()=>{if(!Conn.on){b.style.display='';shown=true}},1500);
+    else{b.style.display='none';if(shown)toast('✓ Зв\'язок відновлено','ok');shown=false}});
+  if(!Conn.on)t=setTimeout(()=>{if(!Conn.on){b.style.display='';shown=true}},1500);
+  return b}
+const SS=DEMO?sessionStorage:localStorage;
+const savedStudent=()=>{try{return JSON.parse(SS.getItem('collab-student')||'null')}catch(e){return null}};
+const saveStudent=o=>{try{SS.setItem('collab-student',JSON.stringify(o))}catch(e){}};
 function Subs(){const l=[];return{on(ref,ev,cb){ref.on(ev,cb);l.push([ref,ev,cb]);return cb},off(){for(const[r,e,c]of l)try{r.off(e,c)}catch(x){}l.length=0}}}
 const RR=p=>BK.db.ref('collab/rooms/'+ROOM+(p?'/'+p:''));
 const canEditIn=(perm,uid)=>{perm=perm||{};const u=perm.u||{};return u[uid]===true||(perm.all===true&&u[uid]!==false)};
@@ -572,16 +598,17 @@ function genCode(){const A='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let s='';for(let i
 const newSid=()=>'s'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 
 /* Спільна «сцена» з завданням: підключення до активного завдання й журналу */
-function connectStage(host,{uid,canAct,nameOf,onActivity,onStatus,onActive}){
+function connectStage(host,{uid,canAct:can0,nameOf,onActivity,onStatus,onActive,cursorOK}){
+  const canAct=()=>Conn.on&&can0();
   let logRef=null,logCb=null,curSid=null,token=0,lastCur=null,curTimer=null,curPending=undefined;const subs=Subs();
   const stage=createStage(host,{uid,canAct,nameOf,onActivity,onStatus,
     push:(sid,key,en)=>RR('log/'+sid+'/'+key).set(en),
     onAlert:m=>toast('💬 '+m,'info',6000),
     onBlocked:k=>{const t=Date.now();if(t-(connectStage._b||0)<3500)return;connectStage._b=t;
-      toast(k==='ro'?'👀 Зараз у вас режим перегляду. Дочекайтеся, поки вчитель надасть доступ.':'⏳ Зачекайте мить: синхронізація…','info',3000)},
+      toast(!Conn.on?'⚠ Немає зв\'язку з сервером — дія не відбудеться. Перевірте інтернет.':k==='ro'?'👀 Зараз у вас режим перегляду. Дочекайтеся, поки вчитель надасть доступ.':'⏳ Зачекайте мить: синхронізація…','info',3000)},
     onSkipped:()=>toast('⚠️ Вашу дію скасовано: хтось інший змінив завдання в ту саму мить. Спробуйте ще раз.','bad',5000),
     onWriteFail:()=>toast('Дію не збережено: можливо, доступ щойно закрито.','bad'),
-    onCursorLocal:c=>{curPending=c;if(curTimer)return;curTimer=setTimeout(()=>{curTimer=null;const v=curPending;curPending=undefined;
+    onCursorLocal:c=>{if(c&&cursorOK&&!cursorOK())return;curPending=c;if(curTimer)return;curTimer=setTimeout(()=>{curTimer=null;const v=curPending;curPending=undefined;
       if(v===null)RR('cur/'+uid).remove().catch(()=>{});else if(v)RR('cur/'+uid).set({...v,t:BK.TS()}).catch(()=>{})},120)}});
   if(DEMO)window.__stage=stage;
   const empty=el('div',{class:'empty'});host.append(empty);
@@ -603,7 +630,8 @@ function connectStage(host,{uid,canAct,nameOf,onActivity,onStatus,onActive}){
       await stage.load(html,a.sid,a.at,entries);if(my!==token)return;
       logRef=RR('log/'+a.sid);logCb=logRef.on('child_added',sn=>stage.remote(sn.key,sn.val()));
     }catch(e){console.error(e);setEmpty('<div class="err">Помилка завантаження: '+(e.message||e)+'</div>')}});
-  stage.dispose=()=>{token++;subs.off();if(logRef){logRef.off('child_added',logCb);logRef=null}stage.unload()};
+  const unConn=Conn.sub(()=>stage.permChanged());
+  stage.dispose=()=>{token++;subs.off();unConn();if(logRef){logRef.off('child_added',logCb);logRef=null}stage.unload()};
   return stage}
 
 /* ================= СТАРТ ================= */
@@ -645,7 +673,7 @@ function fatal(e){clear();$app.append(el('div',{class:'center'},el('div',{class:
 
 function cabinet(uid,prof){
   clear();
-  const D={active:null,meta:{},perm:{},students:{},groups:{},sel:new Set(),acting:{},tab:'st'};
+  const D={active:null,meta:{},perm:{},students:{},groups:{},sel:new Set(),acting:{},tab:'st',hands:{},q:{}};
   const nameOf=u=>u===uid?'Вчитель':(D.students[u]?D.students[u].ln+' '+D.students[u].fn:'Учень');
   const host=el('div',{class:'stage'}),syncB=el('span',{class:'pill warn',style:'display:none'},'⟳ Синхронізація…');
   const actPill=el('span',{class:'pill ro'},'Завдання не відкрито');
@@ -661,7 +689,7 @@ function cabinet(uid,prof){
     DEMO?el('button',{class:'sm',onclick:()=>{if(confirm('Очистити всі демо-дані в цьому браузері?')){localStorage.removeItem('collab-demo-db');location.reload()}}},'Скинути демо')
        :el('button',{class:'sm',onclick:()=>BK.auth.signOut().then(()=>location.reload())},'Вийти'));
   const side=el('div',{class:'side'});
-  $app.append(el('div',{class:'app'},top,
+  $app.append(el('div',{class:'app'},top,connBanner(),
     DEMO?el('div',{class:'demo'},'Демо-режим: дані зберігаються лише в цьому браузері. Відкрийте ',el('a',{href:studentLink(ROOM),target:'_blank'},'посилання учня'),' у кількох вкладках, щоб перевірити спільну роботу.'):null,
     el('div',{class:'main'},el('div',{class:'stagewrap'},host),side)));
   let actT={};
@@ -672,8 +700,24 @@ function cabinet(uid,prof){
   RR('perm').on('value',s=>{D.perm=s.val()||{};renderSide()});
   RR('students').on('value',s=>{D.students=s.val()||{};renderSide()});
   RR('groups').on('value',s=>{D.groups=s.val()||{};renderSide()});
+  let handsInit=false;
+  RR('hands').on('value',s=>{const v=s.val()||{};
+    if(handsInit)for(const u of Object.keys(v))if(!D.hands[u])toast('✋ '+nameOf(u)+' піднімає руку','info',5000);
+    handsInit=true;D.hands=v;renderSide()});
+  RR('q').on('value',s=>{D.q=s.val()||{};renderSide()});
   RR('cur').on('value',s=>{const v=s.val()||{};let ch=false;for(const u of Object.keys(v)){if(u!==uid){D.acting[u]=Date.now();ch=true}}if(ch)renderSideSoon()});
   setInterval(renderSideSoon,4000);
+  /* Прибирання: учні, яких немає в мережі понад добу, застарілі курсори й зайві дозволи */
+  const DAY=24*3600e3;
+  async function tidy(){try{
+    const st=(await RR('students').once('value')).val()||{},pm=(await RR('perm/u').once('value')).val()||{},cu=(await RR('cur').once('value')).val()||{};
+    const t=sNow(),upd={};
+    for(const[u,v]of Object.entries(st))if(!v||(!v.on&&(!v.at||t-v.at>DAY))){upd['students/'+u]=null;upd['perm/u/'+u]=null;upd['cur/'+u]=null;upd['hands/'+u]=null}
+    const hs=(await RR('hands').once('value')).val()||{};for(const u of Object.keys(hs))if(!st[u])upd['hands/'+u]=null;
+    for(const u of Object.keys(pm))if(!st[u]||upd['students/'+u]===null)upd['perm/u/'+u]=null;
+    for(const[u,c]of Object.entries(cu))if(!c||!c.t||t-c.t>60e3)upd['cur/'+u]=null;
+    if(Object.keys(upd).length)await RR().update(upd)}catch(e){console.warn('tidy',e)}}
+  setTimeout(tidy,5000);setInterval(tidy,30*60e3);
   function showQR(){const url=studentLink(ROOM);
     modal('Підключення учнів',el('div',{class:'qr',html:qrSvg(url)}),el('div',{class:'qrcode-big'},ROOM),el('div',{class:'mu',style:'word-break:break-all;text-align:center'},url),
       el('div',{class:'row',style:'justify-content:center'},el('button',{onclick:()=>copy(url)},'🔗 Скопіювати посилання'),
@@ -700,16 +744,48 @@ function cabinet(uid,prof){
     for(const u of[...D.sel])if(!D.students[u])D.sel.delete(u);
     const online=list.filter(x=>x.on).length,editors=list.filter(x=>canEditIn(D.perm,x.u)).length;
     side.append(el('div',{class:'tabsb'},
-      el('button',{class:D.tab==='st'?'on':'',onclick:()=>{D.tab='st';renderSide()}},'👥 Учні (',String(online),')'),
+      el('button',{class:D.tab==='st'?'on':'',onclick:()=>{D.tab='st';renderSide()}},'👥 Учні (',String(online),')',Object.keys(D.hands).length?' ✋'+Object.keys(D.hands).length:''),
       el('button',{class:D.tab==='tk'?'on':'',onclick:()=>{D.tab='tk';renderSide()}},'📄 Завдання')));
     const body=el('div',{class:'sbody'});side.append(body);
     if(D.tab==='tk')renderTasks(body);else renderStudents(body,list,online,editors);
     body.scrollTop=keep;if(fk){const f=[...side.querySelectorAll('[aria-label]')].find(x=>x.getAttribute('aria-label')===fk);if(f)f.focus({preventScroll:true})}}
+  /* ---------- «До дошки»: руки, черга, наступний ---------- */
+  const isOn=u=>D.students[u]&&D.students[u].on;
+  const qList=()=>(Array.isArray(D.q.l)?D.q.l:Object.values(D.q.l||{})).filter(u=>D.students[u]);
+  const handOrder=()=>Object.entries(D.hands).filter(([u])=>D.students[u]).sort((a,b)=>a[1]-b[1]).map(x=>x[0]);
+  function giveTurn(u){const l=qList().filter(x=>x!==u);
+    return RR().update({perm:{all:false,u:{[u]:true}},['hands/'+u]:null,'q/l':l.length?l:null,['q/d/'+u]:true,'q/c':u})
+      .then(()=>toast('✏️ До дошки: '+nameOf(u),'ok')).catch(e=>toast(e.message,'bad'))}
+  function nextTurn(){const c=[...handOrder(),...qList()].filter(u=>isOn(u)&&u!==D.q.c);
+    if(!c.length){toast('Черга порожня. Натисніть «🎲 Випадковий» або складіть чергу.','info');return}giveTurn(c[0])}
+  function randomTurn(){const on=Object.keys(D.students).filter(u=>isOn(u)&&u!==D.q.c);if(!on.length){toast('Немає учнів онлайн.','info');return}
+    let pool=on.filter(u=>!(D.q.d||{})[u]);if(!pool.length){RR('q/d').remove();pool=on}
+    giveTurn(pool[Math.floor(Math.random()*pool.length)])}
+  const shuffle=a=>{a=[...a];for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a};
+  function queueBox(list){
+    const cur=D.q.c&&canEditIn(D.perm,D.q.c)?D.q.c:null,hands=handOrder(),q=qList().filter(u=>!D.hands[u]),done=Object.keys(D.q.d||{}).filter(u=>D.students[u]).length;
+    const row=(u,i,isHand)=>el('div',{class:'qrow'+(isOn(u)?'':' off')},el('span',{class:'qn'},isHand?'✋':(hands.length+i+1)+'.'),el('span',{class:'nm'},nameOf(u),isOn(u)?'':' (не в мережі)'),
+      el('button',{class:'sm ok',title:'Дати доступ лише цьому учневі',onclick:()=>giveTurn(u)},'▶'),
+      el('button',{class:'sm cx',title:isHand?'Опустити руку':'Прибрати з черги',onclick:()=>isHand?RR('hands/'+u).remove():RR('q/l').set(qList().filter(x=>x!==u))},'×'));
+    return el('div',{class:'grp qbox'},el('div',{class:'gl'},'🎯 До дошки'),
+      cur?el('div',{class:'qcur'},'Зараз виконує: ',el('b',{},nameOf(cur))):el('div',{class:'mu'},'Зараз ніхто не виконує окремо.'),
+      el('div',{class:'row'},
+        el('button',{class:'sm pri',onclick:nextTurn,title:'Доступ отримає перший, хто підняв руку, або наступний у черзі; у решти доступ закриється'},'▶ Наступний'),
+        el('button',{class:'sm',onclick:randomTurn,title:'Випадковий учень онлайн, який ще не був біля дошки'},'🎲 Випадковий'),
+        el('button',{class:'sm',disabled:!cur&&!editorsAny(),onclick:()=>RR().update({perm:{all:false},'q/c':null})},'⏹ Завершити хід')),
+      (hands.length||q.length)?el('div',{class:'qlist'},...hands.map((u,i)=>row(u,i,true)),...q.map((u,i)=>row(u,i,false))):el('div',{class:'mu'},'Черга порожня. Учні можуть піднімати руку ✋.'),
+      el('div',{class:'row'},el('span',{class:'mu'},'Скласти чергу:'),
+        el('button',{class:'sm lnk',onclick:()=>{const l=shuffle(list.filter(x=>x.on&&x.u!==cur).map(x=>x.u));if(l.length)RR('q/l').set(l)}},'🎲 з усіх онлайн'),
+        el('button',{class:'sm lnk',disabled:!D.sel.size,onclick:()=>{const l=list.filter(x=>D.sel.has(x.u)).map(x=>x.u);RR('q/l').set(l)}},'з вибраних'),
+        q.length?el('button',{class:'sm lnk',onclick:()=>RR('q/l').remove()},'очистити'):null),
+      done?el('div',{class:'mu'},'Уже були біля дошки: '+done+' ',el('button',{class:'sm lnk',onclick:()=>RR('q/d').remove()},'почати коло заново')):null)}
+  const editorsAny=()=>Object.keys(D.students).some(u=>canEditIn(D.perm,u));
   function renderStudents(body,list,online,editors){
     const selN=D.sel.size;const selArr=[...D.sel];
-    const setPerm=v=>RR('perm').set(v).catch(e=>toast(e.message,'bad'));
+    const setPerm=v=>RR().update({perm:v,'q/c':null}).catch(e=>toast(e.message,'bad'));
     body.append(
       el('div',{class:'stat'},'Онлайн: ',el('b',{},String(online)),' з ',String(list.length),' · Виконують: ',el('b',{},String(editors)),D.perm.all?el('span',{class:'badge ed'},'доступ усім'):null),
+      queueBox(list),
       el('div',{class:'grp'},el('div',{class:'gl'},'Доступ для всіх'),el('div',{class:'row'},
         el('button',{class:'sm ok',onclick:()=>setPerm({all:true})},'✏️ Усім учням'),
         el('button',{class:'sm',onclick:()=>setPerm({all:false})},'🔒 Нікому'))),
@@ -737,9 +813,9 @@ function cabinet(uid,prof){
       const cb=el('input',{type:'checkbox','aria-label':'Вибрати '+s.ln+' '+s.fn});cb.checked=D.sel.has(s.u);
       cb.onchange=()=>{cb.checked?D.sel.add(s.u):D.sel.delete(s.u);renderSide()};
       ul.append(el('div',{class:'st'+(D.sel.has(s.u)?' sel':'')+(s.on?'':' off')},cb,el('span',{class:'dot'+(s.on?' on':''),title:s.on?'онлайн':'не в мережі'}),
-        el('span',{class:'nm',onclick:()=>{D.sel.has(s.u)?D.sel.delete(s.u):D.sel.add(s.u);renderSide()}},s.ln+' '+s.fn,act?el('span',{class:'acting',title:'діє зараз'},' ✍️'):null),
-        el('button',{class:'sm tg '+(ed?'ok':''),title:ed?'Забрати доступ':'Надати доступ',onclick:()=>RR('perm/u/'+s.u).set(!ed)},ed?'✏️ виконує':'👀 дивиться'),
-        el('button',{class:'sm cx',title:'Відключити учня',onclick:()=>{if(confirm('Відключити '+s.ln+' '+s.fn+'?')){RR('students/'+s.u).remove();RR('perm/u/'+s.u).remove();RR('cur/'+s.u).remove()}}},'×')))}
+        el('span',{class:'nm',onclick:()=>{D.sel.has(s.u)?D.sel.delete(s.u):D.sel.add(s.u);renderSide()}},s.ln+' '+s.fn,D.hands[s.u]?el('span',{class:'hand',title:'піднімає руку'},' ✋'):null,act?el('span',{class:'acting',title:'діє зараз'},' ✍️'):null),
+        el('button',{class:'sm tg '+(ed?'ok':''),title:ed?'Забрати доступ':'Надати доступ',onclick:()=>{RR('perm/u/'+s.u).set(!ed);if(!ed)RR('hands/'+s.u).remove()}},ed?'✏️ виконує':'👀 дивиться'),
+        el('button',{class:'sm cx',title:'Відключити учня',onclick:()=>{if(confirm('Відключити '+s.ln+' '+s.fn+'?')){RR('students/'+s.u).remove();RR('perm/u/'+s.u).remove();RR('cur/'+s.u).remove();RR('hands/'+s.u).remove()}}},'×')))}
     body.append(ul);
     if(list.some(x=>!x.on))body.append(el('button',{class:'sm lnk',onclick:()=>{list.filter(x=>!x.on).forEach(x=>{RR('students/'+x.u).remove();RR('perm/u/'+x.u).remove()})}},'🧹 Прибрати зі списку тих, хто не в мережі'))}
   function renderTasks(body){
@@ -782,11 +858,32 @@ function cabinet(uid,prof){
 async function studentMain(){
   clear();$app.append(el('div',{class:'center'},el('div',{class:'mu'},'Завантаження…')));
   try{await initBackend('s')}catch(e){return fatal(e)}
+  const sv=savedStudent(),urlR=DEMO?'DEMO':(Q.get('r')||'').trim().toUpperCase();
+  if(sv&&sv.auto&&sv.ln&&sv.fn&&(!urlR||sv.r===urlR))return autoJoin(sv);
   joinScreen()}
+async function doJoin(r,L,F){
+  let uid;
+  if(DEMO){uid=sessionStorage.getItem('collab-demo-s');if(!uid){uid='S'+Math.random().toString(36).slice(2,10);sessionStorage.setItem('collab-demo-s',uid)}}
+  else{const sv=savedStudent();
+    /* інший учень на тому самому пристрої отримує новий ідентифікатор (і не успадковує доступ попереднього) */
+    if(BK.auth.currentUser&&sv&&(sv.ln!==L||sv.fn!==F))await BK.auth.signOut();
+    if(!BK.auth.currentUser)await BK.auth.signInAnonymously();uid=BK.auth.currentUser.uid}
+  ROOM=r;const o=(await RR('owner').once('value')).val();
+  if(!o)return 'Кімнату з таким кодом не знайдено.';
+  saveStudent({r,ln:L,fn:F,auto:true});
+  studentRoom(uid,o,L,F);return null}
+function autoJoin(sv){
+  clear();let cancel=false;
+  $app.append(el('div',{class:'center'},el('div',{class:'box'},el('h1',{},'👋 Повертаємо вас до кімнати…'),
+    el('div',{},el('b',{},sv.ln+' '+sv.fn),' · кімната ',el('b',{},sv.r)),
+    el('button',{class:'lnk',onclick:()=>{cancel=true;saveStudent({...sv,auto:false});joinScreen()}},'Це не я — увійти як інший учень'))));
+  setTimeout(async()=>{if(cancel)return;
+    try{const e=await doJoin(sv.r,sv.ln,sv.fn);if(e){saveStudent({...sv,auto:false});joinScreen(e)}}
+    catch(e){console.error(e);joinScreen('Не вдалося підключитися: '+(e.message||e))}},700)}
 function joinScreen(msg){
   clear();
   let room=DEMO?'DEMO':(Q.get('r')||'').trim().toUpperCase();
-  let saved=null;try{saved=JSON.parse(localStorage.getItem('collab-student')||'null')}catch(e){}
+  const saved=savedStudent();
   const code=el('input',{type:'text',placeholder:'Код кімнати',maxlength:'8',value:room||(saved&&saved.r)||'',autocomplete:'off',style:'text-transform:uppercase;letter-spacing:.15em;font-weight:700'});
   const ln=el('input',{type:'text',placeholder:'Прізвище',autocomplete:'family-name',value:saved?saved.ln:''}),fn=el('input',{type:'text',placeholder:"Ім'я",autocomplete:'given-name',value:saved?saved.fn:''});
   const err=el('div',{class:'err'},msg||'');
@@ -794,13 +891,7 @@ function joinScreen(msg){
     if(!r){err.textContent='Введіть код кімнати.';return}
     if(!NAME_OK.test(L)||!NAME_OK.test(F)){err.textContent="Введіть прізвище та ім'я українськими або латинськими літерами.";return}
     btn.disabled=true;
-    try{let uid;
-      if(DEMO){uid='S'+Math.random().toString(36).slice(2,10)}
-      else{if(!BK.auth.currentUser)await BK.auth.signInAnonymously();uid=BK.auth.currentUser.uid}
-      ROOM=r;const o=(await RR('owner').once('value')).val();
-      if(!o){err.textContent='Кімнату з таким кодом не знайдено.';btn.disabled=false;return}
-      localStorage.setItem('collab-student',JSON.stringify({r,ln:L,fn:F}));
-      studentRoom(uid,o,L,F)}
+    try{const e=await doJoin(r,L,F);if(e){err.textContent=e;btn.disabled=false}}
     catch(e){console.error(e);err.textContent='Не вдалося підключитися: '+(e.message||e);btn.disabled=false}};
   const btn=el('button',{class:'pri',onclick:go},'Увійти');
   [code,ln,fn].forEach(i=>i.addEventListener('keydown',e=>{if(e.key==='Enter')go()}));
@@ -810,37 +901,50 @@ function joinScreen(msg){
   (room?(ln.value?fn:ln):code).focus()}
 function studentRoom(uid,owner,L,F){
   clear();
-  const D={perm:{},students:{},me:true,can:false,acting:''};
+  const D={perm:{},students:{},me:true,can:false,acting:'',hands:{},q:{}};
   const nameOf=u=>u===owner?'Вчитель':(D.students[u]?D.students[u].ln+' '+D.students[u].fn:'Учень');
   const host=el('div',{class:'stage'});
   const pill=el('span',{class:'pill ro'},'👀 Перегляд'),taskT=el('span',{class:'ttl'},'Завдання'),actingTxt=el('span',{class:'mu acting-txt'}),syncB=el('span',{class:'pill warn',style:'display:none'},'⟳');
   const side=el('div',{class:'side',style:'display:none'}),main=el('div',{class:'main noside'},el('div',{class:'stagewrap'},host),side);
+  const handBtn=el('button',{class:'sm hand-btn',onclick:()=>{if(D.hands[uid])RR('hands/'+uid).remove();else{RR('hands/'+uid).set(BK.TS()).catch(e=>toast(e.message,'bad'))}}},'✋ Підняти руку');
+  const qInfo=el('span',{class:'qinfo'});
+  function updHand(){const up=!!D.hands[uid];handBtn.style.display=D.can?'none':'';handBtn.classList.toggle('up',up);
+    handBtn.textContent=up?'✋ Опустити руку':'✋ Підняти руку';
+    const order=[...Object.entries(D.hands).filter(([u])=>D.students[u]&&D.students[u].on).sort((a,b)=>a[1]-b[1]).map(x=>x[0]),
+      ...(Array.isArray(D.q.l)?D.q.l:Object.values(D.q.l||{})).filter(u=>!D.hands[u]&&D.students[u]&&D.students[u].on)];
+    const i=order.indexOf(uid);qInfo.textContent=D.can||i<0?'':i===0?'⏭ Ви наступний!':'У черзі: №'+(i+1)}
   const partBtn=el('button',{class:'sm',onclick:()=>{const s=side.style.display==='none';side.style.display=s?'':'none';main.classList.toggle('noside',!s);renderSide()}},'👥 Учасники');
-  $app.append(el('div',{class:'app'},el('div',{class:'top'},el('span',{class:'me'},'👤 ',L+' '+F),taskT,pill,syncB,actingTxt,el('span',{class:'sp'}),partBtn,
+  $app.append(el('div',{class:'app'},el('div',{class:'top'},el('span',{class:'me'},'👤 ',L+' '+F),taskT,pill,handBtn,qInfo,syncB,actingTxt,el('span',{class:'sp'}),partBtn,
     el('button',{class:'sm',title:'Перезібрати завдання',onclick:()=>stage.resync()},'⟳'),
-    el('button',{class:'sm',onclick:leave},'Вийти')),main));
+    el('button',{class:'sm',onclick:leave},'Вийти')),connBanner(),main));
   let at={};
   const onActivity=u=>{if(u===uid)return;actingTxt.textContent='Діє: '+nameOf(u);clearTimeout(at.t);at.t=setTimeout(()=>{actingTxt.textContent=''},3500)};
-  const stage=connectStage(host,{uid,canAct:()=>D.can,nameOf,onActivity,onStatus:s=>{syncB.style.display=s==='sync'?'':'none'},
+  const editorsNow=()=>Object.entries(D.students).filter(([u,v])=>v&&v.on&&canEditIn(D.perm,u)).length;
+  const stage=connectStage(host,{uid,canAct:()=>D.can,cursorOK:()=>editorsNow()<=5,nameOf,onActivity,onStatus:s=>{syncB.style.display=s==='sync'?'':'none'},
     onActive:a=>{taskT.textContent=a?a.name:'Очікування завдання'}});
   const meRef=RR('students/'+uid);let gone=false,connCb=null;const subs=Subs();
-  if(DEMO){meRef.set({ln:L,fn:F,on:true,at:Date.now()});meRef.onDisconnect().update({on:false})}
+  if(DEMO){meRef.set({ln:L,fn:F,on:true,at:Date.now()});meRef.onDisconnect().update({on:false,at:Date.now()})}
   else{connCb=BK.fdb.ref('.info/connected').on('value',s=>{if(s.val()!==true||gone)return;
-    meRef.update({ln:L,fn:F,on:true,at:BK.TS()}).then(()=>meRef.onDisconnect().update({on:false}))
+    meRef.update({ln:L,fn:F,on:true,at:BK.TS()}).then(()=>meRef.onDisconnect().update({on:false,at:BK.TS()}))
       .catch(e=>{console.warn(e);toast('Не вдалося зареєструватися в списку учнів: '+(e.message||e),'bad',8000)})})}
   let seen=false;
-  subs.on(meRef,'value',s=>{const v=s.val();if(v){seen=true;return}if(seen&&!gone){gone=true;cleanup();joinScreen('Вас відключено від кімнати. Якщо вчитель змінив код — увійдіть за новим посиланням або QR-кодом.')}});
+  subs.on(meRef,'value',s=>{const v=s.val();if(v){seen=true;return}if(seen&&!gone){gone=true;cleanup();const sv=savedStudent();if(sv)saveStudent({...sv,auto:false});joinScreen('Вас відключено від кімнати. Якщо вчитель змінив код — увійдіть за новим посиланням або QR-кодом.')}});
   const upd=()=>{const c=canEditIn(D.perm,uid);if(c!==D.can&&D.ready)toast(c?'✏️ Вчитель надав вам доступ: можете виконувати завдання!':'🔒 Доступ до виконання закрито. Ви бачите, що роблять інші.',c?'ok':'info',4500);
-    D.can=c;D.ready=true;pill.className='pill '+(c?'ok':'ro');pill.textContent=c?'✏️ Ви можете виконувати завдання':'👀 Перегляд';stage.permChanged()};
+    D.can=c;D.ready=true;updHand();pill.className='pill '+(c?'ok':'ro');pill.textContent=c?'✏️ Ви можете виконувати завдання':'👀 Перегляд';stage.permChanged()};
   subs.on(RR('perm'),'value',s=>{D.perm=s.val()||{};upd();renderSide()});
-  subs.on(RR('students'),'value',s=>{D.students=s.val()||{};renderSide()});
+  subs.on(RR('students'),'value',s=>{D.students=s.val()||{};renderSide();updHand()});
+  subs.on(RR('hands'),'value',s=>{D.hands=s.val()||{};updHand();renderSide()});
+  subs.on(RR('q'),'value',s=>{D.q=s.val()||{};updHand()});
   function renderSide(){if(side.style.display==='none')return;side.innerHTML='';
     const list=Object.entries(D.students).map(([u,v])=>({u,...v})).filter(x=>x.on&&(x.ln||x.fn)).sort((a,b)=>String(a.ln).localeCompare(String(b.ln),'uk'));
     partBtn.textContent='👥 Учасники ('+list.length+')';
     side.append(el('div',{class:'sbody'},el('div',{class:'gl'},'Онлайн: '+list.length),
-      ...list.map(s=>el('div',{class:'st2'},el('span',{class:'dot on'}),el('span',{class:'nm'},s.ln+' '+s.fn,s.u===uid?' (ви)':''),canEditIn(D.perm,s.u)?el('span',{class:'badge ed'},'✏️ виконує'):el('span',{class:'badge'},'👀')))))}
+      ...list.map(s=>el('div',{class:'st2'},el('span',{class:'dot on'}),el('span',{class:'nm'},s.ln+' '+s.fn,s.u===uid?' (ви)':''),D.hands[s.u]?el('span',{title:'піднімає руку'},'✋'):null,canEditIn(D.perm,s.u)?el('span',{class:'badge ed'},'✏️ виконує'):el('span',{class:'badge'},'👀')))))}
   function cleanup(){gone=true;subs.off();try{if(connCb)BK.fdb.ref('.info/connected').off('value',connCb)}catch(e){}stage.dispose()}
-  async function leave(){cleanup();try{await meRef.onDisconnect().cancel();await meRef.update({on:false});await RR('cur/'+uid).remove()}catch(e){}joinScreen()}}
+  async function leave(){cleanup();const sv=savedStudent();if(sv)saveStudent({...sv,auto:false});
+    try{await meRef.onDisconnect().cancel();await meRef.update({on:false,at:BK.TS()});await RR('cur/'+uid).remove();await RR('hands/'+uid).remove()}catch(e){}
+    if(!DEMO)try{await BK.auth.signOut()}catch(e){}
+    joinScreen()}}
 
 </script>
 </body>

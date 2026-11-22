@@ -225,6 +225,12 @@
                 ".validate": "newData.hasChildren(['u','t0','e']) && newData.child('e').isString() && newData.child('e').val().length <= 200000"
               }
             }
+          },
+          "hands": {
+            "$u": {
+              ".write": "auth != null && auth.uid === $u",
+              ".validate": "newData.isNumber()"
+            }
           }
         }
       }
