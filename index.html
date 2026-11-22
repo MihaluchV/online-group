@@ -50,7 +50,16 @@ input[type=text],input[type=password]{font:inherit;border:1px solid var(--line);
 .ht{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}.hn{display:flex;flex-direction:column;min-width:0;font-size:13px}
 .hd{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .projbar{display:none}
-.app.proj .top,.app.proj .side,.app.proj .demo{display:none}
+.app.proj .top,.app.proj .side,.app.proj .viewbar{display:inline-flex;gap:4px;align-items:center;flex-wrap:wrap}.viewbar:empty{display:none}
+.vb{--gc:#5d6b84;border-color:var(--gc)!important;color:var(--gc)}.vb.on{background:var(--gc);color:#fff}
+.gbox{border-color:#d7c8f0;background:#fbf8ff}
+.gsel,.gpick{font:inherit;font-size:13px;border:1px solid var(--line);border-radius:8px;padding:3px 6px;background:#fff}
+.gpick{--gc:var(--line);border:2px solid var(--gc);font-weight:700;color:var(--gc)}
+.st{grid-template-columns:auto auto minmax(0,1fr) auto auto auto}
+.gchip{--gc:#888;border:2px solid var(--gc);color:var(--gc);border-radius:20px;padding:2px 10px;font-size:13px;font-weight:700}
+.gbadge{color:#fff;border-radius:20px;padding:4px 12px;font-size:13px;font-weight:700}
+.pr-grp{color:#fff;padding:4px 14px;border-radius:20px;font-weight:700}
+.demo{display:none}
 .app.proj .main{grid-template-columns:minmax(0,1fr)}
 .app.proj .projbar{display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:8px 16px;background:#16213a;color:#fff;font-size:20px}
 .projbar b{color:#9cc0ff;letter-spacing:.12em}.pr-task{font-weight:700}.pr-ed{background:#14663e;padding:4px 14px;border-radius:20px;font-weight:700}
@@ -69,7 +78,7 @@ input[type=text],input[type=password]{font:inherit;border:1px solid var(--line);
 .empty b{font-size:18px}
 .side{border-left:1px solid var(--line);background:var(--card);display:flex;flex-direction:column;min-height:0}
 .tabsb{display:flex;border-bottom:1px solid var(--line)}
-.tabsb button{flex:1;border:0;border-radius:0;border-bottom:3px solid transparent;background:none;min-height:42px}
+.tabsb button{flex:1;border:0;border-radius:0;border-bottom:3px solid transparent;background:none;min-height:42px;font-size:14px;padding:6px 4px;white-space:nowrap}
 .tabsb button.on{border-bottom-color:var(--brand);font-weight:700}
 .sbody{overflow:auto;padding:12px;display:flex;flex-direction:column;gap:10px;flex:1}
 .row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
@@ -601,6 +610,9 @@ class LRef{
     remove(){db.disc.push(()=>s.remove());return Promise.resolve()},set(v){db.disc.push(()=>s.set(v));return Promise.resolve()},cancel(){db.disc=[];return Promise.resolve()}}}}
 
 let ROOM='';
+const GCOL=['#2f6fdf','#16884f','#d81b60','#ef6c00','#9b51e0','#00838f'];
+const gColor=g=>GCOL[(g-1)%GCOL.length];
+const gnum=v=>typeof v==='string'?(+v.slice(1)||0):(+v||0);
 /* Стан з'єднання з сервером */
 const Conn={on:true,ls:new Set(),
   init(){if(DEMO){addEventListener('online',()=>this.set(true));addEventListener('offline',()=>this.set(false));this.set(navigator.onLine);window.__setConn=v=>this.set(v);return}
@@ -624,7 +636,7 @@ function genCode(){const A='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let s='';for(let i
 const newSid=()=>'s'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 
 /* Спільна «сцена» з завданням: підключення до активного завдання й журналу */
-function connectStage(host,{uid,canAct:can0,nameOf,onActivity,onStatus,onActive,cursorOK,onLogChange,isTeacher}){
+function connectStage(host,{uid,canAct:can0,nameOf,onActivity,onStatus,onActive,cursorOK,onLogChange,isTeacher,pickSession}){
   const canAct=()=>Conn.on&&can0();
   let logRef=null,logCb=null,curSid=null,token=0,lastCur=null,curTimer=null,curPending=undefined;const subs=Subs();
   let logRmCb=null;
@@ -636,28 +648,35 @@ function connectStage(host,{uid,canAct:can0,nameOf,onActivity,onStatus,onActive,
     onSkipped:()=>toast('⚠️ Вашу дію скасовано: хтось інший змінив завдання в ту саму мить. Спробуйте ще раз.','bad',5000),
     onWriteFail:()=>toast('Дію не збережено: можливо, доступ щойно закрито.','bad'),
     onCursorLocal:c=>{if(c&&cursorOK&&!cursorOK())return;curPending=c;if(curTimer)return;curTimer=setTimeout(()=>{curTimer=null;const v=curPending;curPending=undefined;
-      if(v===null)RR('cur/'+uid).remove().catch(()=>{});else if(v)RR('cur/'+uid).set({...v,t:BK.TS()}).catch(()=>{})},120)}});
+      if(v===null)RR('cur/'+uid).remove().catch(()=>{});else if(v)RR('cur/'+uid).set({...v,s:stage.sid||'',t:BK.TS()}).catch(()=>{})},120)}});
   if(DEMO)window.__stage=stage;
   const empty=el('div',{class:'empty'});host.append(empty);
   const setEmpty=html=>{empty.innerHTML=html||'';empty.style.display=html?'':'none'};
   subs.on(RR('cur'),'value',s=>{const v=s.val()||{};const seen=new Set();
-    for(const[u,c]of Object.entries(v)){if(u===uid||!c)continue;seen.add(u);if(lastCur&&JSON.stringify(lastCur[u])===JSON.stringify(c))continue;stage.setCursor(u,c,nameOf(u))}
+    for(const[u,c]of Object.entries(v)){if(u===uid||!c||(c.s&&c.s!==stage.sid))continue;seen.add(u);if(lastCur&&JSON.stringify(lastCur[u])===JSON.stringify(c))continue;stage.setCursor(u,c,nameOf(u))}
     if(lastCur)for(const u of Object.keys(lastCur))if(!seen.has(u))stage.setCursor(u,null);lastCur=v});
-  subs.on(RR('active'),'value',async s=>{const a=s.val();const my=++token;onActive&&onActive(a);
-    if(!a||!a.sid){if(logRef){logRef.off('child_added',logCb);logRef.off('child_removed',logRmCb);logRef=null}curSid=null;stage.unload();
-      setEmpty('<div><div style="font-size:42px">📄</div><b>Завдання ще не відкрито</b><div class="mu">'+(onActive&&onActive.teacher?'Завантажте HTML-файл у вкладці «Завдання» і натисніть «▶ Відкрити для всіх».':'Зачекайте: вчитель скоро відкриє завдання.')+'</div></div>');return}
-    if(a.sid===curSid)return;
-    if(logRef){logRef.off('child_added',logCb);logRef.off('child_removed',logRmCb);logRef=null}
-    curSid=a.sid;setEmpty('<div class="mu">Завантаження завдання…</div>');
+  const htmlCache={};let lastA=null;
+  const detach=()=>{if(logRef){logRef.off('child_added',logCb);logRef.off('child_removed',logRmCb);logRef=null}};
+  async function apply(a){
+    if(!a||!a.sid){token++;detach();curSid=null;stage.unload();
+      setEmpty('<div><div style="font-size:42px">📄</div><b>Завдання ще не відкрито</b><div class="mu">'+(isTeacher?'Завантажте HTML-файл у вкладці «Завдання» і натисніть «▶ Відкрити для всіх».':'Зачекайте: вчитель скоро відкриє завдання.')+'</div></div>');return}
+    const ps=pickSession?pickSession(a):{sid:a.sid,at:a.at};
+    if(!ps){token++;detach();curSid=null;stage.unload();
+      setEmpty('<div><div style="font-size:42px">🧩</div><b>Групова робота</b><div class="mu">Зачекайте: учитель розподіляє учнів на групи.</div></div>');return}
+    if(ps.sid===curSid)return;
+    const my=++token;detach();
+    curSid=ps.sid;setEmpty('<div class="mu">Завантаження завдання…</div>');
     try{
-      const html=(await RR('html/'+a.tid).once('value')).val();if(my!==token)return;
+      let html=htmlCache[a.tid];if(!html){html=(await RR('html/'+a.tid).once('value')).val();if(html)htmlCache[a.tid]=html}if(my!==token)return;
       if(!html){setEmpty('<div class="mu">Файл завдання не знайдено.</div>');return}
-      const entries=(await RR('log/'+a.sid).once('value')).val()||{};if(my!==token)return;
+      const entries=(await RR('log/'+ps.sid).once('value')).val()||{};if(my!==token)return;
       setEmpty('');
-      await stage.load(html,a.sid,a.at,entries);if(my!==token)return;
-      logRef=RR('log/'+a.sid);logCb=logRef.on('child_added',sn=>stage.remote(sn.key,sn.val()));
-      const sidNow=a.sid;logRmCb=logRef.on('child_removed',sn=>{if(stage.sid===sidNow)stage.removed(sn.key)});
-    }catch(e){console.error(e);setEmpty('<div class="err">Помилка завантаження: '+(e.message||e)+'</div>')}});
+      await stage.load(html,ps.sid,ps.at,entries);if(my!==token)return;
+      logRef=RR('log/'+ps.sid);logCb=logRef.on('child_added',sn=>stage.remote(sn.key,sn.val()));
+      const sidNow=ps.sid;logRmCb=logRef.on('child_removed',sn=>{if(stage.sid===sidNow)stage.removed(sn.key)});
+    }catch(e){console.error(e);if(my===token){curSid=null;setEmpty('<div class="err">Помилка завантаження: '+(e.message||e)+'</div>')}}}
+  subs.on(RR('active'),'value',s=>{lastA=s.val();onActive&&onActive(lastA);apply(lastA)});
+  stage.reapply=()=>apply(lastA);
   const unConn=Conn.sub(()=>stage.permChanged());
   /* «Дивіться сюди» від учителя */
   if(!isTeacher){let first=true,lastN=null;subs.on(RR('look'),'value',s=>{const v=s.val();
@@ -705,8 +724,14 @@ function fatal(e){clear();$app.append(el('div',{class:'center'},el('div',{class:
 
 function cabinet(uid,prof){
   clear();
-  const D={active:null,meta:{},perm:{},students:{},groups:{},sel:new Set(),acting:{},tab:'st',hands:{},q:{}};
-  const projBar=el('div',{class:'projbar'});
+  const D={active:null,meta:{},perm:{},students:{},groups:{},sel:new Set(),acting:{},tab:'st',hands:{},q:{},ga:{},gcfg:{},view:'all'};
+  const projBar=el('div',{class:'projbar'}),viewBar=el('span',{class:'viewbar'});
+  const gOn=()=>!!(D.active&&D.active.groups);
+  const viewLabel=()=>gOn()&&D.view!=='all'&&D.active.groups.s[D.view]?'Група '+D.view.slice(1):'';
+  function renderView(){viewBar.innerHTML='';if(!gOn()){if(D.view!=='all'){D.view='all';stage.reapply()}return}
+    const n=D.active.groups.n,cnt=g=>Object.entries(D.ga).filter(([u,v])=>gnum(v)===g&&D.students[u]&&D.students[u].on).length;
+    const b=(key,label,col)=>el('button',{class:'sm vb'+(D.view===key?' on':''),style:col?'--gc:'+col:'',onclick:()=>{D.view=key;renderView();stage.reapply();renderSide()}},label);
+    viewBar.append(el('span',{class:'mu'},'Дивлюсь:'),b('all','Весь клас'),...Array.from({length:n},(_,i)=>b('g'+(i+1),'Група '+(i+1)+' ('+cnt(i+1)+')',gColor(i+1))))}
   const nameOf=u=>u===uid?'Вчитель':(D.students[u]?D.students[u].ln+' '+D.students[u].fn:'Учень');
   const host=el('div',{class:'stage'}),syncB=el('span',{class:'pill warn',style:'display:none'},'⟳ Синхронізація…');
   const actPill=el('span',{class:'pill ro'},'Завдання не відкрито');
@@ -716,7 +741,7 @@ function cabinet(uid,prof){
     el('span',{class:'roomcode',title:'Код кімнати для учнів'},'Кімната: ',el('b',{},ROOM)),
     el('button',{class:'sm',onclick:()=>copy(studentLink(ROOM))},'🔗 Посилання для учнів'),
     el('button',{class:'sm',onclick:showQR},'▦ QR-код'),
-    actPill,syncB,actingTxt,el('span',{class:'sp'}),
+    actPill,viewBar,syncB,actingTxt,el('span',{class:'sp'}),
     el('button',{class:'sm',title:'Прокрутити в усіх учнів завдання до того місця, яке зараз бачите ви',onclick:look},'👁 Дивіться сюди'),
     el('button',{class:'sm',title:'Режим проєктора: лише завдання на весь екран',onclick:()=>projector(true)},'📽 Проєктор'),
     el('button',{class:'sm',title:'Перезібрати завдання з журналу дій',onclick:()=>stage.resync()},'⟳'),
@@ -729,9 +754,12 @@ function cabinet(uid,prof){
     el('div',{class:'main'},el('div',{class:'stagewrap'},host),side)));
   let actT={};
   const onActivity=u=>{D.acting[u]=Date.now();actingTxt.textContent='Діє: '+nameOf(u);clearTimeout(actT.t);actT.t=setTimeout(()=>{actingTxt.textContent='';renderSide()},3500);renderSideSoon()};
-  const onActive=a=>{D.active=a;actPill.className='pill '+(a?'ok':'ro');actPill.textContent=a?'▶ '+a.name:'Завдання не відкрито';renderSide()};onActive.teacher=true;
+  const onActive=a=>{D.active=a;setTimeout(renderView,0);actPill.className='pill '+(a?'ok':'ro');actPill.textContent=a?'▶ '+a.name:'Завдання не відкрито';renderSide()};onActive.teacher=true;
   let lcT=0;const onLogChange=()=>{if(D.tab!=='hi'||lcT)return;lcT=setTimeout(()=>{lcT=0;renderSide()},250)};
-  const stage=connectStage(host,{uid,canAct:()=>true,nameOf,onActivity,onStatus:s=>{syncB.style.display=s==='sync'?'':'none'},onActive,onLogChange,isTeacher:true});
+  const pickSession=a=>(a.groups&&D.view!=='all'&&a.groups.s&&a.groups.s[D.view])?a.groups.s[D.view]:{sid:a.sid,at:a.at};
+  const stage=connectStage(host,{uid,canAct:()=>true,nameOf,onActivity,onStatus:s=>{syncB.style.display=s==='sync'?'':'none'},onActive,onLogChange,isTeacher:true,pickSession});
+  RR('ga').on('value',s=>{D.ga=s.val()||{};renderView();renderSide()});
+  RR('gcfg').on('value',s=>{D.gcfg=s.val()||{};renderSide()});
   RR('meta').on('value',s=>{D.meta=s.val()||{};renderSide()});
   RR('perm').on('value',s=>{D.perm=s.val()||{};renderSide()});
   RR('students').on('value',s=>{D.students=s.val()||{};renderSide()});
@@ -748,7 +776,7 @@ function cabinet(uid,prof){
   async function tidy(){try{
     const st=(await RR('students').once('value')).val()||{},pm=(await RR('perm/u').once('value')).val()||{},cu=(await RR('cur').once('value')).val()||{};
     const t=sNow(),upd={};
-    for(const[u,v]of Object.entries(st))if(!v||(!v.on&&(!v.at||t-v.at>DAY))){upd['students/'+u]=null;upd['perm/u/'+u]=null;upd['cur/'+u]=null;upd['hands/'+u]=null}
+    for(const[u,v]of Object.entries(st))if(!v||(!v.on&&(!v.at||t-v.at>DAY))){upd['students/'+u]=null;upd['perm/u/'+u]=null;upd['cur/'+u]=null;upd['hands/'+u]=null;upd['ga/'+u]=null}
     const hs=(await RR('hands').once('value')).val()||{};for(const u of Object.keys(hs))if(!st[u])upd['hands/'+u]=null;
     for(const u of Object.keys(pm))if(!st[u]||upd['students/'+u]===null)upd['perm/u/'+u]=null;
     for(const[u,c]of Object.entries(cu))if(!c||!c.t||t-c.t>60e3)upd['cur/'+u]=null;
@@ -798,9 +826,9 @@ function cabinet(uid,prof){
   function renderHistory(body){
     const a=D.active;if(!a){body.append(el('div',{class:'mu'},'Завдання не відкрито.'));return}
     const all=stage.entries(),list=all.slice(-60).reverse();
-    body.append(el('div',{class:'mu'},'Дії в завданні «'+a.name+'», нові зверху. ',el('b',{},'↶'),' скасовує одну дію, ',el('b',{},'⤺'),' повертає завдання до стану перед цією дією (скасовує її та всі пізніші). Зміни бачать усі.'));
+    body.append(el('div',{class:'mu'},'Дії в завданні «'+a.name+'»'+(viewLabel()?' — '+viewLabel():gOn()?' — весь клас':'')+', нові зверху. ',el('b',{},'↶'),' скасовує одну дію, ',el('b',{},'⤺'),' повертає завдання до стану перед цією дією (скасовує її та всі пізніші). Зміни бачать усі.'));
     if(!list.length){body.append(el('div',{class:'mu',style:'padding:8px 0'},'Ще ніхто нічого не робив.'));return}
-    const rm=keys=>{const upd={};keys.forEach(k=>upd['log/'+a.sid+'/'+k]=null);return RR().update(upd).then(()=>toast('↶ Скасовано дій: '+keys.length,'ok')).catch(e=>toast(e.message,'bad'))};
+    const rm=keys=>{const upd={};keys.forEach(k=>upd['log/'+stage.sid+'/'+k]=null);return RR().update(upd).then(()=>toast('↶ Скасовано дій: '+keys.length,'ok')).catch(e=>toast(e.message,'bad'))};
     const ul=el('div',{class:'hist'});
     for(const[k,en]of list){const t=new Date(parseInt(k.slice(0,9),36));
       const idx=all.findIndex(x=>x[0]===k),after=all.slice(idx).map(x=>x[0]);
@@ -813,14 +841,14 @@ function cabinet(uid,prof){
   /* ---------- «Дивіться сюди» ---------- */
   let lookN=0;
   function look(){const a=D.active,an=stage.anchor();if(!a||!an){toast('Спершу відкрийте завдання.','info');return}
-    RR('look').set({...an,sid:a.sid,n:Date.now().toString(36)+(++lookN)}).then(()=>toast('👁 Учням показано це місце','ok',2000))}
+    RR('look').set({...an,sid:stage.sid,n:Date.now().toString(36)+(++lookN)}).then(()=>toast('👁 Учням показано це місце','ok',2000))}
   /* ---------- Режим проєктора ---------- */
   function projector(on){const app=$app.querySelector('.app');if(!app)return;app.classList.toggle('proj',on);
     try{if(on&&!document.fullscreenElement)document.documentElement.requestFullscreen().catch(()=>{});if(!on&&document.fullscreenElement)document.exitFullscreen().catch(()=>{})}catch(e){}
     renderProj()}
   function renderProj(){const app=$app.querySelector('.app');if(!app||!app.classList.contains('proj'))return;
     const eds=Object.keys(D.students).filter(u=>D.students[u].on&&canEditIn(D.perm,u)).map(nameOf),hn=Object.keys(D.hands).length;
-    projBar.innerHTML='';projBar.append(...[el('span',{class:'pr-room'},'Кімната ',el('b',{},ROOM)),el('span',{class:'pr-task'},D.active?D.active.name:''),
+    projBar.innerHTML='';projBar.append(...[el('span',{class:'pr-room'},'Кімната ',el('b',{},ROOM)),el('span',{class:'pr-task'},D.active?D.active.name:''),viewLabel()?el('span',{class:'pr-grp',style:'background:'+gColor(+D.view.slice(1))},viewLabel()):null,
       el('span',{class:'pr-ed'},D.perm.all?'✏️ Виконують усі':eds.length?'✏️ Виконує: '+eds.join(', '):'👀 Усі дивляться'),
       hn?el('span',{class:'pr-hands'},'✋ '+hn):null,el('span',{class:'sp'}),
       el('button',{class:'sm',onclick:look,title:'Прокрутити в усіх учнів до цього місця'},'👁'),
@@ -856,12 +884,41 @@ function cabinet(uid,prof){
         el('button',{class:'sm lnk',disabled:!D.sel.size,onclick:()=>{const l=list.filter(x=>D.sel.has(x.u)).map(x=>x.u);RR('q/l').set(l)}},'з вибраних'),
         q.length?el('button',{class:'sm lnk',onclick:()=>RR('q/l').remove()},'очистити'):null),
       done?el('div',{class:'mu'},'Уже були біля дошки: '+done+' ',el('button',{class:'sm lnk',onclick:()=>RR('q/d').remove()},'почати коло заново')):null)}
+  /* ---------- Групова робота ---------- */
+  function groupBox(list){
+    const n=D.gcfg.n||0,on=gOn(),onl=list.filter(x=>x.on);
+    const cnt=g=>onl.filter(x=>gnum(D.ga[x.u])===g).length,none=onl.filter(x=>!(gnum(D.ga[x.u])>=1&&gnum(D.ga[x.u])<=n)).length;
+    const sel=el('select',{class:'gsel','aria-label':'Кількість груп',disabled:on||null},el('option',{value:'0'},'—'),...[2,3,4,5,6].map(k=>el('option',{value:k},k+(k<5?' групи':' груп'))));
+    sel.value=String(n);sel.onchange=()=>{const k=+sel.value;RR('gcfg').set(k?{n:k}:null);if(!k)RR('ga').remove()};
+    const box=el('div',{class:'grp gbox'},el('div',{class:'gl'},'🧩 Групова робота'),
+      el('div',{class:'row'},el('span',{class:'mu'},'Кількість:'),sel,
+        n?el('button',{class:'sm',onclick:()=>randomGroups(onl,n)},'🎲 Розподілити випадково'):null,
+        n&&Object.keys(D.ga).length&&!on?el('button',{class:'sm lnk',onclick:()=>RR('ga').remove()},'скинути'):null));
+    if(n){box.append(el('div',{class:'row'},...Array.from({length:n},(_,i)=>el('span',{class:'gchip',style:'--gc:'+gColor(i+1)},'Група '+(i+1)+': '+cnt(i+1))),
+        none?el('span',{class:'mu'},'без групи: '+none):null),
+      el('div',{class:'mu'},'Щоб розподілити вручну, виберіть групу біля імені учня в списку нижче.'),
+      on?el('button',{class:'sm',onclick:stopGroups},'⏹ Завершити групову роботу'):el('button',{class:'sm pri',onclick:()=>startGroups(onl,n,none)},'▶ Почати роботу в групах'))}
+    else box.append(el('div',{class:'mu'},'Виберіть кількість груп, і кожна група отримає власну копію відкритого завдання.'));
+    return box}
+  function randomGroups(onl,n){const l=shuffle(onl.map(x=>x.u)),upd={};l.forEach((u,i)=>upd[u]='g'+((i%n)+1));
+    for(const u of Object.keys(D.ga))if(!(u in upd)&&!(D.students[u]&&D.students[u].on))upd[u]=null;
+    RR('ga').update(upd).then(()=>toast('🎲 Учнів розподілено на '+n+' групи','ok'))}
+  async function startGroups(onl,n,none){const a=D.active;if(!a){toast('Спершу відкрийте завдання (вкладка «Завдання»).','info');return}
+    if(none&&!confirm(none+' учн. без групи бачитимуть лише «Зачекайте». Почати?'))return;
+    const m=D.meta[a.tid]||{},gs={...(m.gs||{})},t=Math.floor(sNow());
+    for(let g=1;g<=n;g++)if(!gs['g'+g])gs['g'+g]={sid:newSid()+g,at:t};
+    const s={};for(let g=1;g<=n;g++)s['g'+g]=gs['g'+g];
+    await RR().update({['meta/'+a.tid+'/gs']:gs,'active/groups':{n,s},perm:{all:true},'q/c':null});
+    toast('▶ Групова робота почалась: кожна група працює у своїй копії','ok')}
+  function stopGroups(){if(!confirm('Завершити групову роботу? Учні повернуться до спільного завдання класу. Роботи груп збережуться.'))return;
+    D.view='all';RR('active/groups').remove()}
   const editorsAny=()=>Object.keys(D.students).some(u=>canEditIn(D.perm,u));
   function renderStudents(body,list,online,editors){
     const selN=D.sel.size;const selArr=[...D.sel];
     const setPerm=v=>RR().update({perm:v,'q/c':null}).catch(e=>toast(e.message,'bad'));
     body.append(
       el('div',{class:'stat'},'Онлайн: ',el('b',{},String(online)),' з ',String(list.length),' · Виконують: ',el('b',{},String(editors)),D.perm.all?el('span',{class:'badge ed'},'доступ усім'):null),
+      groupBox(list),
       queueBox(list),
       el('div',{class:'grp'},el('div',{class:'gl'},'Доступ для всіх'),el('div',{class:'row'},
         el('button',{class:'sm ok',onclick:()=>setPerm({all:true})},'✏️ Усім учням'),
@@ -874,15 +931,15 @@ function cabinet(uid,prof){
         el('button',{class:'sm lnk',onclick:()=>{list.filter(x=>x.on).forEach(x=>D.sel.add(x.u));renderSide()}},'☑ вибрати всіх онлайн'),
         el('button',{class:'sm lnk',disabled:!selN,onclick:()=>{D.sel.clear();renderSide()}},'✕ зняти вибір'))));
     const gl=Object.entries(D.groups);
-    const gbox=el('div',{class:'grp'},el('div',{class:'gl'},'Групи'));
+    const gbox=el('div',{class:'grp'},el('div',{class:'gl'},'Набори учнів'));
     const chips=el('div',{class:'row'});
     for(const[gid,g]of gl){const m=g.m||{};const mem=list.filter(x=>m[nkey(x.ln,x.fn)]);const on=mem.filter(x=>x.on).length;
-      chips.append(el('span',{class:'chip'},el('button',{class:'cb',title:'Вибрати учасників групи: '+Object.values(m).join(', '),onclick:()=>{D.sel.clear();mem.forEach(x=>D.sel.add(x.u));renderSide()}},g.name,' ',el('small',{},on+'/'+Object.keys(m).length)),
-        el('button',{class:'cx',title:'Видалити групу',onclick:()=>{if(confirm('Видалити групу «'+g.name+'»?'))RR('groups/'+gid).remove()}},'×')))}
-    if(!gl.length)chips.append(el('span',{class:'mu'},'Виберіть учнів і збережіть їх як групу.'));
+      chips.append(el('span',{class:'chip'},el('button',{class:'cb',title:'Вибрати учнів набору: '+Object.values(m).join(', '),onclick:()=>{D.sel.clear();mem.forEach(x=>D.sel.add(x.u));renderSide()}},g.name,' ',el('small',{},on+'/'+Object.keys(m).length)),
+        el('button',{class:'cx',title:'Видалити набір',onclick:()=>{if(confirm('Видалити набір «'+g.name+'»?'))RR('groups/'+gid).remove()}},'×')))}
+    if(!gl.length)chips.append(el('span',{class:'mu'},'Виберіть учнів і збережіть їх як набір, щоб наступного разу вибрати одним кліком.'));
     gbox.append(chips,el('div',{class:'row'},el('button',{class:'sm',disabled:!selN,onclick:()=>{
-      const nm=(prompt('Назва групи:','Група '+(gl.length+1))||'').trim();if(!nm)return;const m={};
-      selArr.forEach(x=>{const s=D.students[x];if(s)m[nkey(s.ln,s.fn)]=s.ln+' '+s.fn});RR('groups/g'+Date.now().toString(36)).set({name:nm.slice(0,40),m})}},'＋ Група з вибраних')));
+      const nm=(prompt('Назва набору:','Набір '+(gl.length+1))||'').trim();if(!nm)return;const m={};
+      selArr.forEach(x=>{const s=D.students[x];if(s)m[nkey(s.ln,s.fn)]=s.ln+' '+s.fn});RR('groups/g'+Date.now().toString(36)).set({name:nm.slice(0,40),m})}},'＋ Набір з вибраних')));
     body.append(gbox);
     const ul=el('div',{class:'stlist'});
     if(!list.length)ul.append(el('div',{class:'mu',style:'padding:8px'},'Учні ще не підключилися. Дайте їм посилання або QR-код кімнати ',el('b',{},ROOM),'.'));
@@ -891,6 +948,8 @@ function cabinet(uid,prof){
       cb.onchange=()=>{cb.checked?D.sel.add(s.u):D.sel.delete(s.u);renderSide()};
       ul.append(el('div',{class:'st'+(D.sel.has(s.u)?' sel':'')+(s.on?'':' off')},cb,el('span',{class:'dot'+(s.on?' on':''),title:s.on?'онлайн':'не в мережі'}),
         el('span',{class:'nm',onclick:()=>{D.sel.has(s.u)?D.sel.delete(s.u):D.sel.add(s.u);renderSide()}},s.ln+' '+s.fn,D.hands[s.u]?el('span',{class:'hand',title:'піднімає руку'},' ✋'):null,act?el('span',{class:'acting',title:'діє зараз'},' ✍️'):null),
+        (D.gcfg.n?(()=>{const g=gnum(D.ga[s.u]),gs=el('select',{class:'gpick','aria-label':'Група учня '+s.ln+' '+s.fn,style:g?'--gc:'+gColor(g):''},el('option',{value:'0'},'—'),...Array.from({length:D.gcfg.n},(_,i)=>el('option',{value:i+1},'Г'+(i+1))));
+          gs.value=String(g);gs.onchange=()=>RR('ga/'+s.u).set(+gs.value?'g'+gs.value:null);return gs})():el('span')),
         el('button',{class:'sm tg '+(ed?'ok':''),title:ed?'Забрати доступ':'Надати доступ',onclick:()=>{RR('perm/u/'+s.u).set(!ed);if(!ed)RR('hands/'+s.u).remove()}},ed?'✏️ виконує':'👀 дивиться'),
         el('button',{class:'sm cx',title:'Відключити учня',onclick:()=>{if(confirm('Відключити '+s.ln+' '+s.fn+'?')){RR('students/'+s.u).remove();RR('perm/u/'+s.u).remove();RR('cur/'+s.u).remove();RR('hands/'+s.u).remove()}}},'×')))}
     body.append(ul);
@@ -917,18 +976,21 @@ function cabinet(uid,prof){
           m.sid?el('button',{class:'sm',onclick:()=>restart(tid)},'⟲ Почати заново'):null,
           el('button',{class:'sm',onclick:()=>{const n=(prompt('Нова назва:',m.name)||'').trim();if(n)RR('meta/'+tid+'/name').set(n.slice(0,80)).then(()=>{if(act)RR('active/name').set(n.slice(0,80))})}},'✏️'),
           el('button',{class:'sm cx',title:'Видалити',onclick:()=>delTask(tid)},'🗑'))))}}
-  async function openTask(tid){const m=D.meta[tid];if(!m)return;let sid=m.sid,sat=m.sat;
+  async function openTask(tid){const m=D.meta[tid];if(!m)return;let sid=m.sid,sat=m.sat;D.view='all';
     if(!sid){sid=newSid();sat=Math.floor(sNow());await RR('meta/'+tid).update({sid,sat})}
     await RR('active').set({tid,sid,at:sat,name:m.name});toast('Завдання відкрито для всіх','ok')}
   async function restart(tid){const m=D.meta[tid];if(!m)return;
-    if(!confirm('Почати «'+m.name+'» заново? Усі дії в цьому завданні буде стерто для всіх.'))return;
-    const old=m.sid,sid=newSid(),sat=Math.floor(sNow());
-    await RR('meta/'+tid).update({sid,sat});
-    if(D.active&&D.active.tid===tid)await RR('active').set({tid,sid,at:sat,name:m.name});
-    if(old)RR('log/'+old).remove()}
+    if(!confirm('Почати «'+m.name+'» заново? Усі дії в цьому завданні (і в роботах груп) буде стерто для всіх.'))return;
+    const old=m.sid,sid=newSid(),sat=Math.floor(sNow()),oldG=m.gs||{},gs={};
+    for(const k of Object.keys(oldG))gs[k]={sid:newSid()+k.slice(1),at:sat};
+    await RR('meta/'+tid).update({sid,sat,gs:Object.keys(gs).length?gs:null});
+    const a=D.active;
+    if(a&&a.tid===tid){const na={tid,sid,at:sat,name:m.name};if(a.groups){const s2={};for(const k of Object.keys(a.groups.s||{}))s2[k]=gs[k]||{sid:newSid()+k.slice(1),at:sat};na.groups={n:a.groups.n,s:s2}}
+      await RR('active').set(na)}
+    if(old)RR('log/'+old).remove();for(const v of Object.values(oldG))if(v&&v.sid)RR('log/'+v.sid).remove()}
   async function delTask(tid){const m=D.meta[tid];if(!m)return;if(!confirm('Видалити завдання «'+m.name+'» разом із поступом?'))return;
     if(D.active&&D.active.tid===tid)await RR('active').set(null);
-    if(m.sid)await RR('log/'+m.sid).remove();await RR('html/'+tid).remove();await RR('meta/'+tid).remove()}
+    if(m.sid)await RR('log/'+m.sid).remove();for(const v of Object.values(m.gs||{}))if(v&&v.sid)await RR('log/'+v.sid).remove();await RR('html/'+tid).remove();await RR('meta/'+tid).remove()}
   renderSide()}
 
 /* ================= УЧЕНЬ ================= */
@@ -978,27 +1040,29 @@ function joinScreen(msg){
   (room?(ln.value?fn:ln):code).focus()}
 function studentRoom(uid,owner,L,F){
   clear();
-  const D={perm:{},students:{},me:true,can:false,acting:'',hands:{},q:{}};
+  const D={perm:{},students:{},me:true,can:false,acting:'',hands:{},q:{},g:0,act:null};
   const nameOf=u=>u===owner?'Вчитель':(D.students[u]?D.students[u].ln+' '+D.students[u].fn:'Учень');
   const host=el('div',{class:'stage'});
   const pill=el('span',{class:'pill ro'},'👀 Перегляд'),taskT=el('span',{class:'ttl'},'Завдання'),actingTxt=el('span',{class:'mu acting-txt'}),syncB=el('span',{class:'pill warn',style:'display:none'},'⟳');
   const side=el('div',{class:'side',style:'display:none'}),main=el('div',{class:'main noside'},el('div',{class:'stagewrap'},host),side);
   const handBtn=el('button',{class:'sm hand-btn',onclick:()=>{if(D.hands[uid])RR('hands/'+uid).remove();else{RR('hands/'+uid).set(BK.TS()).catch(e=>toast(e.message,'bad'))}}},'✋ Підняти руку');
-  const qInfo=el('span',{class:'qinfo'});
+  const qInfo=el('span',{class:'qinfo'}),gBadge=el('span',{class:'gbadge',style:'display:none'});
+  const updG=()=>{const on=!!(D.act&&D.act.groups);gBadge.style.display=on&&D.g?'':'none';if(on&&D.g){gBadge.textContent='🧩 Група '+D.g;gBadge.style.background=gColor(D.g)}};
   function updHand(){const up=!!D.hands[uid];handBtn.style.display=D.can?'none':'';handBtn.classList.toggle('up',up);
     handBtn.textContent=up?'✋ Опустити руку':'✋ Підняти руку';
     const order=[...Object.entries(D.hands).filter(([u])=>D.students[u]&&D.students[u].on).sort((a,b)=>a[1]-b[1]).map(x=>x[0]),
       ...(Array.isArray(D.q.l)?D.q.l:Object.values(D.q.l||{})).filter(u=>!D.hands[u]&&D.students[u]&&D.students[u].on)];
     const i=order.indexOf(uid);qInfo.textContent=D.can||i<0?'':i===0?'⏭ Ви наступний!':'У черзі: №'+(i+1)}
   const partBtn=el('button',{class:'sm',onclick:()=>{const s=side.style.display==='none';side.style.display=s?'':'none';main.classList.toggle('noside',!s);renderSide()}},'👥 Учасники');
-  $app.append(el('div',{class:'app'},el('div',{class:'top'},el('span',{class:'me'},'👤 ',L+' '+F),taskT,pill,handBtn,qInfo,syncB,actingTxt,el('span',{class:'sp'}),partBtn,
+  $app.append(el('div',{class:'app'},el('div',{class:'top'},el('span',{class:'me'},'👤 ',L+' '+F),taskT,gBadge,pill,handBtn,qInfo,syncB,actingTxt,el('span',{class:'sp'}),partBtn,
     el('button',{class:'sm',title:'Перезібрати завдання',onclick:()=>stage.resync()},'⟳'),
     el('button',{class:'sm',onclick:leave},'Вийти')),connBanner(),main));
   let at={};
   const onActivity=u=>{if(u===uid)return;actingTxt.textContent='Діє: '+nameOf(u);clearTimeout(at.t);at.t=setTimeout(()=>{actingTxt.textContent=''},3500)};
   const editorsNow=()=>Object.entries(D.students).filter(([u,v])=>v&&v.on&&canEditIn(D.perm,u)).length;
-  const stage=connectStage(host,{uid,canAct:()=>D.can,cursorOK:()=>editorsNow()<=5,nameOf,onActivity,onStatus:s=>{syncB.style.display=s==='sync'?'':'none'},
-    onActive:a=>{taskT.textContent=a?a.name:'Очікування завдання'}});
+  const pickSession=a=>a.groups?((D.g&&a.groups.s&&a.groups.s['g'+D.g])||null):{sid:a.sid,at:a.at};
+  const stage=connectStage(host,{uid,canAct:()=>D.can,cursorOK:()=>editorsNow()<=5,pickSession,nameOf,onActivity,onStatus:s=>{syncB.style.display=s==='sync'?'':'none'},
+    onActive:a=>{D.act=a;taskT.textContent=a?a.name:'Очікування завдання';updG();renderSide()}});
   const meRef=RR('students/'+uid);let gone=false,connCb=null;const subs=Subs();
   if(DEMO){meRef.set({ln:L,fn:F,on:true,at:Date.now()});meRef.onDisconnect().update({on:false,at:Date.now()})}
   else{connCb=BK.fdb.ref('.info/connected').on('value',s=>{if(s.val()!==true||gone)return;
@@ -1012,10 +1076,13 @@ function studentRoom(uid,owner,L,F){
   subs.on(RR('students'),'value',s=>{D.students=s.val()||{};renderSide();updHand()});
   subs.on(RR('hands'),'value',s=>{D.hands=s.val()||{};updHand();renderSide()});
   subs.on(RR('q'),'value',s=>{D.q=s.val()||{};updHand()});
+  let gFirst=true;subs.on(RR('ga'),'value',s=>{D.ga=s.val()||{};const g=gnum(D.ga[uid]),ch=g!==D.g;D.g=g;updG();renderSide();
+    if(ch){if(!gFirst&&D.act&&D.act.groups)toast(g?'🧩 Вас додано до групи '+g:'Вас вилучено з групи','info');stage.reapply&&stage.reapply()}gFirst=false});
   function renderSide(){if(side.style.display==='none')return;side.innerHTML='';
-    const list=Object.entries(D.students).map(([u,v])=>({u,...v})).filter(x=>x.on&&(x.ln||x.fn)).sort((a,b)=>String(a.ln).localeCompare(String(b.ln),'uk'));
+    const grp=!!(D.act&&D.act.groups&&D.g);
+    const list=Object.entries(D.students).map(([u,v])=>({u,...v})).filter(x=>x.on&&(x.ln||x.fn)&&(!grp||x.u===uid||gnum(D.ga[x.u])===D.g)).sort((a,b)=>String(a.ln).localeCompare(String(b.ln),'uk'));
     partBtn.textContent='👥 Учасники ('+list.length+')';
-    side.append(el('div',{class:'sbody'},el('div',{class:'gl'},'Онлайн: '+list.length),
+    side.append(el('div',{class:'sbody'},el('div',{class:'gl'},(grp?'Група '+D.g+' · ':'')+'онлайн: '+list.length),
       ...list.map(s=>el('div',{class:'st2'},el('span',{class:'dot on'}),el('span',{class:'nm'},s.ln+' '+s.fn,s.u===uid?' (ви)':''),D.hands[s.u]?el('span',{title:'піднімає руку'},'✋'):null,canEditIn(D.perm,s.u)?el('span',{class:'badge ed'},'✏️ виконує'):el('span',{class:'badge'},'👀')))))}
   function cleanup(){gone=true;subs.off();try{if(connCb)BK.fdb.ref('.info/connected').off('value',connCb)}catch(e){}stage.dispose()}
   async function leave(){cleanup();const sv=savedStudent();if(sv)saveStudent({...sv,auto:false});

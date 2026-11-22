@@ -221,7 +221,7 @@
           "log": {
             "$s": {
               "$k": {
-                ".write": "auth != null && !data.exists() && newData.child('u').val() === auth.uid && $s === root.child('collab/rooms/'+$r+'/active/sid').val() && (root.child('collab/rooms/'+$r+'/perm/u/'+auth.uid).val() === true || (root.child('collab/rooms/'+$r+'/perm/all').val() === true && root.child('collab/rooms/'+$r+'/perm/u/'+auth.uid).val() !== false))",
+                ".write": "auth != null && !data.exists() && newData.child('u').val() === auth.uid && ($s === root.child('collab/rooms/'+$r+'/active/sid').val() || $s === root.child('collab/rooms/'+$r+'/active/groups/s/'+root.child('collab/rooms/'+$r+'/ga/'+auth.uid).val()+'/sid').val()) && (root.child('collab/rooms/'+$r+'/perm/u/'+auth.uid).val() === true || (root.child('collab/rooms/'+$r+'/perm/all').val() === true && root.child('collab/rooms/'+$r+'/perm/u/'+auth.uid).val() !== false))",
                 ".validate": "newData.hasChildren(['u','t0','e']) && newData.child('e').isString() && newData.child('e').val().length <= 200000"
               }
             }
@@ -230,6 +230,11 @@
             "$u": {
               ".write": "auth != null && auth.uid === $u",
               ".validate": "newData.isNumber()"
+            }
+          },
+          "ga": {
+            "$u": {
+              ".validate": "newData.isString() && newData.val().matches(/^g[1-6]$/)"
             }
           }
         }
