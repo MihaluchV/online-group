@@ -43,6 +43,18 @@ input[type=text],input[type=password]{font:inherit;border:1px solid var(--line);
 @keyframes wave{50%{transform:rotate(-18deg)}}
 .hand-btn.up{background:var(--warnbg);border-color:#f1d9a8;color:var(--warn);font-weight:700}
 .qinfo{font-weight:700;color:var(--brand)}
+.lookflash{position:absolute;border:4px solid #2f6fdf;border-radius:12px;box-shadow:0 0 0 9999px rgba(20,40,90,.10);animation:lf 2.6s ease-out forwards;pointer-events:none}
+@keyframes lf{0%{opacity:0}12%{opacity:1}75%{opacity:1}100%{opacity:0}}
+.hist{display:flex;flex-direction:column;gap:3px}
+.hrow{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:6px;align-items:center;padding:4px 2px;border-bottom:1px solid #eef1f6}
+.ht{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}.hn{display:flex;flex-direction:column;min-width:0;font-size:13px}
+.hd{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.projbar{display:none}
+.app.proj .top,.app.proj .side,.app.proj .demo{display:none}
+.app.proj .main{grid-template-columns:minmax(0,1fr)}
+.app.proj .projbar{display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:8px 16px;background:#16213a;color:#fff;font-size:20px}
+.projbar b{color:#9cc0ff;letter-spacing:.12em}.pr-task{font-weight:700}.pr-ed{background:#14663e;padding:4px 14px;border-radius:20px;font-weight:700}
+.pr-hands{background:#9a5b00;padding:4px 12px;border-radius:20px;font-weight:700}
 .demo{background:var(--warnbg);color:var(--warn);padding:6px 12px;font-size:13px;border-bottom:1px solid #f1d9a8}
 .main{flex:1;display:grid;grid-template-columns:minmax(0,1fr) 350px;min-height:0}
 .main.noside{grid-template-columns:minmax(0,1fr)}
@@ -263,7 +275,7 @@ function createStage(host, o){
     Promise.resolve().then(()=>o.push(S.sid,b.key,en)).catch(err=>{console.warn('Запис відхилено',err);
       if(gen!==S.gen)return;S.known.delete(b.key);S.applied.delete(b.key);S.maxKey=[...S.applied].sort().pop()||'';
       o.onWriteFail&&o.onWriteFail(err);requestRebuild()});
-    o.onActivity&&o.onActivity(o.uid);
+    o.onActivity&&o.onActivity(o.uid);o.onLogChange&&o.onLogChange();
     endCursorSoon();
     pumpQueue()}
   setInterval(()=>{if(gestureActive()&&now()-S.lastLocal>4000){resetGesture();flush();pumpQueue()}},1000);
@@ -482,10 +494,24 @@ function createStage(host, o){
     async load(html,sid,t0,entries){
       S.gen++;teardown();S.html=html;S.sid=sid;S.t0=t0||now();S.seed=hashStr(sid);
       S.known=new Map(Object.entries(entries||{}));S.applied=new Set();S.maxKey='';S.queue=[];S.ready=false;S.needRebuild=false;S.rebuilding=false;S.playing=false;S.pumping=false;
-      await rebuild();S.ready=true;
+      await rebuild();S.ready=true;o.onLogChange&&o.onLogChange();
       S.queue=[...S.known.keys()].filter(k=>!S.applied.has(k));pumpQueue()},
     unload(){S.gen++;teardown();S.html=null;S.sid=null;S.ready=false},
-    remote(key,en){if(!en||S.known.has(key))return;S.known.set(key,en);if(!S.ready)return;S.queue.push(key);pumpQueue()},
+    remote(key,en){if(!en||S.known.has(key))return;S.known.set(key,en);o.onLogChange&&o.onLogChange();if(!S.ready)return;S.queue.push(key);pumpQueue()},
+    /* учитель скасував дію(ї): прибираємо з журналу й перебудовуємо */
+    removed(key){if(!S.known.has(key))return;S.known.delete(key);S.applied.delete(key);S.queue=S.queue.filter(k=>k!==key);o.onLogChange&&o.onLogChange();
+      clearTimeout(S.rmT);S.rmT=setTimeout(()=>{S.maxKey=[...S.applied].sort().pop()||'';if(S.ready)requestRebuild()},150)},
+    entries(){return[...S.known.entries()].sort((a,b)=>a[0]<b[0]?-1:1)},
+    /* «Дивіться сюди»: опорний елемент у верхній третині екрана вчителя */
+    anchor(){const ctx=S.ctx;if(!ctx||!ctx.doc)return null;const W=ctx.win.innerWidth,H=ctx.win.innerHeight;
+      let e=ctx.doc.elementFromPoint(W/2,H*0.3);if(!e)return null;
+      while(e.parentElement&&e.parentElement!==ctx.doc.body&&e.getBoundingClientRect().height<80)e=e.parentElement;
+      const p=pathOf(ctx,e);if(!Array.isArray(p))return null;return{p,y:+(e.getBoundingClientRect().top/H).toFixed(3)}},
+    lookAt(a){const ctx=S.ctx;if(!ctx||!ctx.doc||!a)return false;const e=byPath(ctx,a.p);if(!e)return false;const H=ctx.win.innerHeight;
+      try{ctx.win.scrollBy({top:e.getBoundingClientRect().top-a.y*H,behavior:'smooth'})}catch(x){}
+      setTimeout(()=>{if(S.ctx!==ctx)return;const r=e.getBoundingClientRect();if(r.height>H*0.9)return;
+        const fl=el('div',{class:'lookflash',style:`left:${r.left-6}px;top:${r.top-6}px;width:${r.width+12}px;height:${r.height+12}px`});layer.append(fl);setTimeout(()=>fl.remove(),2600)},550);
+      return true},
     resync(){if(S.html)requestRebuild()},
     permChanged(){if(!o.canAct()&&(S.open||gestureActive())){resetGesture();flush()}},
     setCursor,
@@ -598,10 +624,11 @@ function genCode(){const A='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let s='';for(let i
 const newSid=()=>'s'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 
 /* Спільна «сцена» з завданням: підключення до активного завдання й журналу */
-function connectStage(host,{uid,canAct:can0,nameOf,onActivity,onStatus,onActive,cursorOK}){
+function connectStage(host,{uid,canAct:can0,nameOf,onActivity,onStatus,onActive,cursorOK,onLogChange,isTeacher}){
   const canAct=()=>Conn.on&&can0();
   let logRef=null,logCb=null,curSid=null,token=0,lastCur=null,curTimer=null,curPending=undefined;const subs=Subs();
-  const stage=createStage(host,{uid,canAct,nameOf,onActivity,onStatus,
+  let logRmCb=null;
+  const stage=createStage(host,{uid,canAct,nameOf,onActivity,onStatus,onLogChange,
     push:(sid,key,en)=>RR('log/'+sid+'/'+key).set(en),
     onAlert:m=>toast('💬 '+m,'info',6000),
     onBlocked:k=>{const t=Date.now();if(t-(connectStage._b||0)<3500)return;connectStage._b=t;
@@ -617,10 +644,10 @@ function connectStage(host,{uid,canAct:can0,nameOf,onActivity,onStatus,onActive,
     for(const[u,c]of Object.entries(v)){if(u===uid||!c)continue;seen.add(u);if(lastCur&&JSON.stringify(lastCur[u])===JSON.stringify(c))continue;stage.setCursor(u,c,nameOf(u))}
     if(lastCur)for(const u of Object.keys(lastCur))if(!seen.has(u))stage.setCursor(u,null);lastCur=v});
   subs.on(RR('active'),'value',async s=>{const a=s.val();const my=++token;onActive&&onActive(a);
-    if(!a||!a.sid){if(logRef){logRef.off('child_added',logCb);logRef=null}curSid=null;stage.unload();
+    if(!a||!a.sid){if(logRef){logRef.off('child_added',logCb);logRef.off('child_removed',logRmCb);logRef=null}curSid=null;stage.unload();
       setEmpty('<div><div style="font-size:42px">📄</div><b>Завдання ще не відкрито</b><div class="mu">'+(onActive&&onActive.teacher?'Завантажте HTML-файл у вкладці «Завдання» і натисніть «▶ Відкрити для всіх».':'Зачекайте: вчитель скоро відкриє завдання.')+'</div></div>');return}
     if(a.sid===curSid)return;
-    if(logRef){logRef.off('child_added',logCb);logRef=null}
+    if(logRef){logRef.off('child_added',logCb);logRef.off('child_removed',logRmCb);logRef=null}
     curSid=a.sid;setEmpty('<div class="mu">Завантаження завдання…</div>');
     try{
       const html=(await RR('html/'+a.tid).once('value')).val();if(my!==token)return;
@@ -629,9 +656,14 @@ function connectStage(host,{uid,canAct:can0,nameOf,onActivity,onStatus,onActive,
       setEmpty('');
       await stage.load(html,a.sid,a.at,entries);if(my!==token)return;
       logRef=RR('log/'+a.sid);logCb=logRef.on('child_added',sn=>stage.remote(sn.key,sn.val()));
+      const sidNow=a.sid;logRmCb=logRef.on('child_removed',sn=>{if(stage.sid===sidNow)stage.removed(sn.key)});
     }catch(e){console.error(e);setEmpty('<div class="err">Помилка завантаження: '+(e.message||e)+'</div>')}});
   const unConn=Conn.sub(()=>stage.permChanged());
-  stage.dispose=()=>{token++;subs.off();unConn();if(logRef){logRef.off('child_added',logCb);logRef=null}stage.unload()};
+  /* «Дивіться сюди» від учителя */
+  if(!isTeacher){let first=true,lastN=null;subs.on(RR('look'),'value',s=>{const v=s.val();
+    if(first){first=false;lastN=v&&v.n;return}if(!v||v.n===lastN)return;lastN=v.n;
+    if(stage.sid&&v.sid===stage.sid&&stage.lookAt(v))toast('👁 Учитель показує це місце','info',2500)})}
+  stage.dispose=()=>{token++;subs.off();unConn();if(logRef){logRef.off('child_added',logCb);logRef.off('child_removed',logRmCb);logRef=null}stage.unload()};
   return stage}
 
 /* ================= СТАРТ ================= */
@@ -674,6 +706,7 @@ function fatal(e){clear();$app.append(el('div',{class:'center'},el('div',{class:
 function cabinet(uid,prof){
   clear();
   const D={active:null,meta:{},perm:{},students:{},groups:{},sel:new Set(),acting:{},tab:'st',hands:{},q:{}};
+  const projBar=el('div',{class:'projbar'});
   const nameOf=u=>u===uid?'Вчитель':(D.students[u]?D.students[u].ln+' '+D.students[u].fn:'Учень');
   const host=el('div',{class:'stage'}),syncB=el('span',{class:'pill warn',style:'display:none'},'⟳ Синхронізація…');
   const actPill=el('span',{class:'pill ro'},'Завдання не відкрито');
@@ -684,18 +717,21 @@ function cabinet(uid,prof){
     el('button',{class:'sm',onclick:()=>copy(studentLink(ROOM))},'🔗 Посилання для учнів'),
     el('button',{class:'sm',onclick:showQR},'▦ QR-код'),
     actPill,syncB,actingTxt,el('span',{class:'sp'}),
+    el('button',{class:'sm',title:'Прокрутити в усіх учнів завдання до того місця, яке зараз бачите ви',onclick:look},'👁 Дивіться сюди'),
+    el('button',{class:'sm',title:'Режим проєктора: лише завдання на весь екран',onclick:()=>projector(true)},'📽 Проєктор'),
     el('button',{class:'sm',title:'Перезібрати завдання з журналу дій',onclick:()=>stage.resync()},'⟳'),
     el('span',{class:'mu'},prof.name||''),
     DEMO?el('button',{class:'sm',onclick:()=>{if(confirm('Очистити всі демо-дані в цьому браузері?')){localStorage.removeItem('collab-demo-db');location.reload()}}},'Скинути демо')
        :el('button',{class:'sm',onclick:()=>BK.auth.signOut().then(()=>location.reload())},'Вийти'));
   const side=el('div',{class:'side'});
-  $app.append(el('div',{class:'app'},top,connBanner(),
+  $app.append(el('div',{class:'app'},top,projBar,connBanner(),
     DEMO?el('div',{class:'demo'},'Демо-режим: дані зберігаються лише в цьому браузері. Відкрийте ',el('a',{href:studentLink(ROOM),target:'_blank'},'посилання учня'),' у кількох вкладках, щоб перевірити спільну роботу.'):null,
     el('div',{class:'main'},el('div',{class:'stagewrap'},host),side)));
   let actT={};
   const onActivity=u=>{D.acting[u]=Date.now();actingTxt.textContent='Діє: '+nameOf(u);clearTimeout(actT.t);actT.t=setTimeout(()=>{actingTxt.textContent='';renderSide()},3500);renderSideSoon()};
   const onActive=a=>{D.active=a;actPill.className='pill '+(a?'ok':'ro');actPill.textContent=a?'▶ '+a.name:'Завдання не відкрито';renderSide()};onActive.teacher=true;
-  const stage=connectStage(host,{uid,canAct:()=>true,nameOf,onActivity,onStatus:s=>{syncB.style.display=s==='sync'?'':'none'},onActive});
+  let lcT=0;const onLogChange=()=>{if(D.tab!=='hi'||lcT)return;lcT=setTimeout(()=>{lcT=0;renderSide()},250)};
+  const stage=connectStage(host,{uid,canAct:()=>true,nameOf,onActivity,onStatus:s=>{syncB.style.display=s==='sync'?'':'none'},onActive,onLogChange,isTeacher:true});
   RR('meta').on('value',s=>{D.meta=s.val()||{};renderSide()});
   RR('perm').on('value',s=>{D.perm=s.val()||{};renderSide()});
   RR('students').on('value',s=>{D.students=s.val()||{};renderSide()});
@@ -735,7 +771,7 @@ function cabinet(uid,prof){
     catch(e){toast('Не вдалося змінити код: '+(e.message||e),'bad',7000)}}
   let rs=0;function renderSideSoon(){if(rs)return;rs=requestAnimationFrame(()=>{rs=0;renderSide()})}
   let focusKeep=null;
-  function renderSide(){
+  function renderSide(){renderProj();
     const fk=side.contains(document.activeElement)?document.activeElement.getAttribute('aria-label'):null;
     const sc=side.querySelector('.sbody');const keep=sc?sc.scrollTop:0;
     side.innerHTML='';
@@ -745,10 +781,51 @@ function cabinet(uid,prof){
     const online=list.filter(x=>x.on).length,editors=list.filter(x=>canEditIn(D.perm,x.u)).length;
     side.append(el('div',{class:'tabsb'},
       el('button',{class:D.tab==='st'?'on':'',onclick:()=>{D.tab='st';renderSide()}},'👥 Учні (',String(online),')',Object.keys(D.hands).length?' ✋'+Object.keys(D.hands).length:''),
+      el('button',{class:D.tab==='hi'?'on':'',onclick:()=>{D.tab='hi';renderSide()}},'🕘 Історія'),
       el('button',{class:D.tab==='tk'?'on':'',onclick:()=>{D.tab='tk';renderSide()}},'📄 Завдання')));
     const body=el('div',{class:'sbody'});side.append(body);
-    if(D.tab==='tk')renderTasks(body);else renderStudents(body,list,online,editors);
+    if(D.tab==='tk')renderTasks(body);else if(D.tab==='hi')renderHistory(body);else renderStudents(body,list,online,editors);
     body.scrollTop=keep;if(fk){const f=[...side.querySelectorAll('[aria-label]')].find(x=>x.getAttribute('aria-label')===fk);if(f)f.focus({preventScroll:true})}}
+  /* ---------- Історія дій і скасування ---------- */
+  function describe(en){let ev;try{ev=JSON.parse(en.e)}catch(e){return'дія'}
+    const f=(ev.find(r=>r.f)||{}).f,txt=f?f.split(':').slice(1).join(':').trim().slice(0,32):'',q=txt?' «'+txt+'»':'';
+    const has=t=>ev.some(r=>r.y===t),inp=ev.filter(r=>r.k==='i');
+    if(inp.length){const l=inp[inp.length-1];if(l.c!==undefined)return(l.c?'☑ позначка':'☐ зняв позначку')+q;
+      const v=String(l.v??(l.ht?'текст':'')).replace(/\s+/g,' ');return'⌨ введення: «'+(v.length>34?'…'+v.slice(-34):v)+'»'}
+    if(has('drop')||ev.filter(r=>/move|dragover/.test(r.y)).length>2)return'✋ перетягування'+q;
+    if(has('click')||has('pointerdown')||has('touchstart'))return'👆 клацання'+q;
+    if(ev.some(r=>r.k==='k'))return'⌨ клавіші';return'дія'}
+  function renderHistory(body){
+    const a=D.active;if(!a){body.append(el('div',{class:'mu'},'Завдання не відкрито.'));return}
+    const all=stage.entries(),list=all.slice(-60).reverse();
+    body.append(el('div',{class:'mu'},'Дії в завданні «'+a.name+'», нові зверху. ',el('b',{},'↶'),' скасовує одну дію, ',el('b',{},'⤺'),' повертає завдання до стану перед цією дією (скасовує її та всі пізніші). Зміни бачать усі.'));
+    if(!list.length){body.append(el('div',{class:'mu',style:'padding:8px 0'},'Ще ніхто нічого не робив.'));return}
+    const rm=keys=>{const upd={};keys.forEach(k=>upd['log/'+a.sid+'/'+k]=null);return RR().update(upd).then(()=>toast('↶ Скасовано дій: '+keys.length,'ok')).catch(e=>toast(e.message,'bad'))};
+    const ul=el('div',{class:'hist'});
+    for(const[k,en]of list){const t=new Date(parseInt(k.slice(0,9),36));
+      const idx=all.findIndex(x=>x[0]===k),after=all.slice(idx).map(x=>x[0]);
+      ul.append(el('div',{class:'hrow'},el('span',{class:'ht'},t.toLocaleTimeString('uk-UA')),
+        el('span',{class:'hn'},el('b',{style:'color:'+colorOf(en.u)},nameOf(en.u)),el('span',{class:'hd'},describe(en))),
+        el('button',{class:'sm',title:'Скасувати лише цю дію',onclick:()=>{if(confirm('Скасувати цю дію ('+nameOf(en.u)+')?'))rm([k])}},'↶'),
+        el('button',{class:'sm',title:'Повернути завдання до стану перед цією дією',onclick:()=>{if(confirm('Повернути завдання до стану перед цією дією?\nБуде скасовано дій: '+after.length+'.'))rm(after)}},'⤺')))}
+    body.append(ul);
+    if(all.length>60)body.append(el('div',{class:'mu'},'Показано останні 60 з '+all.length+'.'))}
+  /* ---------- «Дивіться сюди» ---------- */
+  let lookN=0;
+  function look(){const a=D.active,an=stage.anchor();if(!a||!an){toast('Спершу відкрийте завдання.','info');return}
+    RR('look').set({...an,sid:a.sid,n:Date.now().toString(36)+(++lookN)}).then(()=>toast('👁 Учням показано це місце','ok',2000))}
+  /* ---------- Режим проєктора ---------- */
+  function projector(on){const app=$app.querySelector('.app');if(!app)return;app.classList.toggle('proj',on);
+    try{if(on&&!document.fullscreenElement)document.documentElement.requestFullscreen().catch(()=>{});if(!on&&document.fullscreenElement)document.exitFullscreen().catch(()=>{})}catch(e){}
+    renderProj()}
+  function renderProj(){const app=$app.querySelector('.app');if(!app||!app.classList.contains('proj'))return;
+    const eds=Object.keys(D.students).filter(u=>D.students[u].on&&canEditIn(D.perm,u)).map(nameOf),hn=Object.keys(D.hands).length;
+    projBar.innerHTML='';projBar.append(...[el('span',{class:'pr-room'},'Кімната ',el('b',{},ROOM)),el('span',{class:'pr-task'},D.active?D.active.name:''),
+      el('span',{class:'pr-ed'},D.perm.all?'✏️ Виконують усі':eds.length?'✏️ Виконує: '+eds.join(', '):'👀 Усі дивляться'),
+      hn?el('span',{class:'pr-hands'},'✋ '+hn):null,el('span',{class:'sp'}),
+      el('button',{class:'sm',onclick:look,title:'Прокрутити в усіх учнів до цього місця'},'👁'),
+      el('button',{class:'sm',onclick:()=>projector(false)},'✕ Вийти з режиму проєктора')].filter(Boolean))}
+  document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement){const app=$app.querySelector('.app');if(app&&app.classList.contains('proj'))renderProj()}});
   /* ---------- «До дошки»: руки, черга, наступний ---------- */
   const isOn=u=>D.students[u]&&D.students[u].on;
   const qList=()=>(Array.isArray(D.q.l)?D.q.l:Object.values(D.q.l||{})).filter(u=>D.students[u]);
