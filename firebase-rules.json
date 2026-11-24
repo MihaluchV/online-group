@@ -239,6 +239,18 @@
           }
         }
       }
+    },
+    "hub": {
+      "owner": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.token.firebase.sign_in_provider === 'password' && !data.exists() && newData.val() === auth.uid"
+      },
+      "gh": {
+        "$uid": {
+          ".read": "auth != null && auth.uid === $uid && root.child('hub').child('owner').val() === auth.uid",
+          ".write": "auth != null && auth.uid === $uid && auth.token.firebase.sign_in_provider === 'password' && root.child('hub').child('owner').val() === auth.uid"
+        }
+      }
     }
   }
 }
